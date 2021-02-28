@@ -1,0 +1,100 @@
+---
+title: "Practical Machine Learning Prediction Assignment"
+author: "J.Erickson"
+date: "2/26/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Summary
+
+This work will explore and predict how well a person is able to do a unilateral dumbbell bicep Curl. Information was taken from subjects using accelerometers on a belt, forearm, arm, and dumbell. Each subject was asked to lift the dumbell 5 ways, 4 of the ways had incorrect form. The data about which form was performed was stored in the "classe" variable. The training and test data for this project were taken from:  http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har.
+
+The classes are broken down as follows:
+- Class A: exactly according to the specification
+- Class B: throwing the elbows to the front
+- Class C: lifting the dumbbell only halfway
+- Class D: lowering the dumbbell only halfway
+- Class E: throwing the hips to the front
+
+## Loading Data
+
+The training and test data were downloaded and stored. Any values marked as "#DIV/0!" were replaced with NA's. The first 8 columns were also removed since this information did not provide any value for predictions.
+
+```{r loadData, results = 'hide'}
+library(caret)
+library(randomForest)
+download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv','trainingdata.csv',method='curl')
+trainingdata <- read.csv("trainingdata.csv", sep=",", header=TRUE, na.strings=c("NA", "#DIV/0!"), stringsAsFactors = FALSE)
+download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv','testingdata.csv',method='curl')
+testingdata <- read.csv("testingdata.csv", sep=",", header=TRUE, na.strings=c("NA", "#DIV/0!"), stringsAsFactors = FALSE)
+# Remove first 8 columns- unnecessary information
+trainingdata <- trainingdata[,-(1:8)]
+testingdata <- testingdata[,-(1:8)]
+```
+
+## Explore/Partition
+
+In order to create tidy data, the variables with a large portion of NA's were removed. This left 52 variables to use in the model. The data was then portioned out giving 75% of the observations to the training set and 25% to the validation set.
+
+```{r tidydata}
+set.seed(12345)
+# If number of na's in a column is <95% of the total number of rows, keep variable column
+trainingdata <- trainingdata[ , colSums(is.na(trainingdata)) < nrow(trainingdata)*.95]
+inTrain  <- createDataPartition(trainingdata$classe, p=0.75, list=FALSE)
+training <- trainingdata[inTrain,]
+validation <- trainingdata[-inTrain,]
+# reassign to x and y to avoid slowing down caret() with model syntax
+y <- training[,52]
+x <- training[,-52]
+str(training)
+```
+
+Here a plot shows the amount of times each class was recorded. Class A, the only correct form, is shown to be most frequent in the training data.
+
+```{r plot}
+plot(factor(training$classe), xlab="Class", ylab="frequency")
+```
+
+## Fit Model
+
+Because there are so many obervations to consider, a random forest model was used to build randomized trees and average those predictions. This results in probabilities of each class across all trees and should be an overall good predictor. In order to make processing of the model quicker, TrainControl was set to use cross-validation, 5 for the number of folds (k-fold), and allowParallel set to TRUE to use the created cluster for parallel processing. A random forest model was then created with the training data.
+
+```{r fitModel, results = 'hide'}
+# Configure parallel processing for speed
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+fitControl <- trainControl(method="cv", number=5, allowParallel=TRUE)
+fit <- train(x, y, method="rf", data=trainingdata, trControl=fitControl)
+# shutdown cluster
+stopCluster(cluster)
+registerDoSEQ()
+```
+```{r fitResults, echo=FALSE}
+fit
+```
+
+## Validation
+
+The validation data was then used with the model. Accuracy is shown to be over 99% with an error under 1%. The frequency of each class is shown in the confusion matrix table. This high accuracy with the validation data shows that random forest method creates an accurate model.
+
+```{r Validation}
+modValid <- predict(fit, validation)
+CM<-confusionMatrix(modValid,as.factor(validation$classe))
+print(CM)
+```
+
+## Prediction
+
+Finally the model was used on the test data (20 observations) to predict the class performed. The predictions for each class are shown in the table below.
+
+```{r Prediction}
+final<- predict(fit, testingdata)
+print(final)
+table(final)
+```
